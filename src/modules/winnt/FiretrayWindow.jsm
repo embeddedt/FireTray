@@ -43,7 +43,12 @@ firetray.Window.shutdown = function() {
 
 firetray.Window.getVisibility = function(wid) {
   let hwnd = firetray.Win32.hexStrToHwnd(wid);
-  let style = user32.GetWindowLongW(hwnd, user32.GWL_STYLE);
+  let style;
+  if (firetray.Handler.app.ABI == "x86_64-msvc") {
+    style = user32.GetWindowLongPtrW(hwnd, user32.GWL_STYLE);
+  } else {
+    style = user32.GetWindowLongW(hwnd, user32.GWL_STYLE);
+  }
   return ((style & user32.WS_VISIBLE) != 0); // user32.IsWindowVisible(hwnd);
 };
 
@@ -57,7 +62,8 @@ firetray.Window.setVisibility = function(wid, visible) {
 		visible = true;
 	}
   let ret = user32.ShowWindow(hwnd, visible ? user32.SW_SHOW : user32.SW_HIDE);
-  if (visible) user32.SetForegroundWindow(hwnd);
+  if (firetray.Utils.prefService.getBoolPref('show_activates'))
+    if (visible) user32.SetForegroundWindow(hwnd);
   log.debug("  ShowWindow="+ret+" winLastError="+ctypes.winLastError);
   return visible;
 };
@@ -138,21 +144,21 @@ firetray.Window.wndProcStartup = function(hWnd, uMsg, wParam, lParam) {
   return user32.CallWindowProcW(user32.WNDPROC(procPrev), hWnd, uMsg, wParam, lParam);
 };
 
-// https://social.msdn.microsoft.com/Forums/en-US/4eb3bad0-caf3-45ca-bfe8-7bc257af986a/getwindowlongsetwindowlong-on-gwlwndproc-crashes-in-compact-2013?forum=winembmngdapp
-var procNat = null;
-firetray.Window.NativeWndProc = function(hWnd, uMsg, wParam, lParam) {
-  return user32.CallWindowProcW(user32.WNDPROC(procNat), hWnd, uMsg, wParam, lParam);
-}
-
 // procInfo = {wid, hwnd, jsProc, mapNew, mapBak}
+var procDummy = null;
 firetray.Window.attachWndProc = function(procInfo) {
   try {
     let wndProc = ctypes.cast(user32.WNDPROC(procInfo.jsProc), win32.LONG_PTR);
     log.debug("proc="+wndProc);
     procInfo.mapNew.insert(procInfo.wid, wndProc);
 //    let procPrev = user32.SetWindowLongW(procInfo.hwnd, user32.GWLP_WNDPROC, wndProc);
-    this.procNat = wndProc;
-    let procPrev = user32.SetWindowLongW(procInfo.hwnd, user32.GWLP_WNDPROC, this.procNat);
+    this.procDummy = wndProc;
+    let procPrev;
+    if (firetray.Handler.app.ABI == "x86_64-msvc") {
+      procPrev = user32.SetWindowLongPtrW(procInfo.hwnd, user32.GWLP_WNDPROC, wndProc);
+    } else {
+      procPrev = user32.SetWindowLongW(procInfo.hwnd, user32.GWLP_WNDPROC, wndProc);
+    }
     log.debug("procPrev="+procPrev+" winLastError="+ctypes.winLastError);
     /* we can't store WNDPROC callbacks (JS ctypes objects) with SetPropW(), as
      we need long-living refs. */
@@ -179,7 +185,12 @@ firetray.Window.detachWndProc = function(procInfo) {
   let procNew = procInfo.mapNew.get(wid);
   let hwnd = firetray.Win32.hexStrToHwnd(wid);
   log.debug("hwnd="+hwnd);
-  let procPrev = user32.SetWindowLongW(hwnd, user32.GWLP_WNDPROC, procBak);
+  let procPrev;
+  if (firetray.Handler.app.ABI == "x86_64-msvc") {
+    procPrev = user32.SetWindowLongPtrW(hwnd, user32.GWLP_WNDPROC, procBak);
+  } else {
+    procPrev = user32.SetWindowLongW(hwnd, user32.GWLP_WNDPROC, procBak);
+  }
   firetray.js.assert(firetray.js.strEquals(procPrev, procNew),
                      "Wrong WndProc replaced.");
   procInfo.mapNew.remove(wid);
